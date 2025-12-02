@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -48,7 +49,9 @@ logger = logging.getLogger(__name__)
 
 # ---------- Bot & Dispatcher ----------
 storage = MemoryStorage()
-bot = Bot(token=API_TOKEN, parse_mode="HTML")
+
+# aiogram v3.7+ requires default=DefaultBotProperties(...) instead of parse_mode=... in Bot(...)
+bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=storage)
 
 BOT_USERNAME: Optional[str] = None
