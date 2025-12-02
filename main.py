@@ -4,7 +4,6 @@ import sqlite3
 import random
 import html
 import time
-import asyncio
 from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException
@@ -18,9 +17,10 @@ from aiogram.types import (
     InlineKeyboardButton,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    ReplyKeyboardRemove,
     Update,
 )
-from aiogram.filters import Command, Text
+from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -171,20 +171,17 @@ async def cmd_start(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-
 @dp.message.register(Command(commands=["help"]))
 async def cmd_help(message: Message):
     await message.answer("Use the buttons in the channel to interact with confessions.")
 
-
-@dp.message.register(Text(text=["📝 Confess", "👀 Browse Confessions"]))
+@dp.message.register(lambda message: message.text in ["📝 Confess", "👀 Browse Confessions"])
 async def top_menu_buttons(message: Message):
     if message.text == "📝 Confess":
-        await message.answer("Send your confession now.", reply_markup=ReplyKeyboardMarkup(remove_keyboard=True))
+        await message.answer("Send your confession now.", reply_markup=ReplyKeyboardRemove())
     else:
-        await message.answer("Browse confessions:", reply_markup=ReplyKeyboardMarkup(remove_keyboard=True))
+        await message.answer("Browse confessions:", reply_markup=ReplyKeyboardRemove())
         await message.answer("https://t.me/eauvents")
-
 
 @dp.message.register()
 async def receive_confession(message: Message):
@@ -224,7 +221,6 @@ async def receive_confession(message: Message):
 
     _last_confession[uid] = now
     await message.reply(f"Posted as {CONFESSION_NAME} #{conf_id}")
-
 
 @dp.message.register(state=AddCommentState.waiting_for_comment)
 async def process_comment(message: Message, state: FSMContext):
@@ -276,7 +272,6 @@ async def process_comment(message: Message, state: FSMContext):
     await message.reply("Comment added!")
     await state.clear()
 
-
 async def send_comments_page(chat_id: int, confession_id: int, page: int = 1, edit_message_id: int = None):
     PAGE_SIZE = 4
     conf = db_execute("SELECT id, text FROM confessions WHERE id=?", (confession_id,), fetch=True)
@@ -315,7 +310,6 @@ async def send_comments_page(chat_id: int, confession_id: int, page: int = 1, ed
 
     await bot.send_message(chat_id, body, reply_markup=kb)
 
-
 @dp.callback_query.register(lambda c: c.data and c.data.startswith("page:"))
 async def callback_page(call: CallbackQuery):
     await call.answer()
@@ -325,10 +319,8 @@ async def callback_page(call: CallbackQuery):
     except Exception:
         pass
 
-
 # ---------- FastAPI app + webhook ----------
 app = FastAPI()
-
 
 @app.on_event("startup")
 async def on_startup():
@@ -347,7 +339,6 @@ async def on_startup():
         except Exception as e:
             logger.exception("Failed to set webhook: %s", e)
 
-
 @app.on_event("shutdown")
 async def on_shutdown():
     try:
@@ -356,11 +347,9 @@ async def on_shutdown():
         pass
     await bot.session.close()
 
-
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "OK"
-
 
 @app.post("/webhook/{token}")
 async def telegram_webhook(token: str, request: Request):
@@ -382,9 +371,7 @@ async def telegram_webhook(token: str, request: Request):
         logger.exception("Error processing update")
     return {"ok": True}
 
-
 if __name__ == "__main__":
     # For local testing only. Render/production should use an ASGI server.
     import uvicorn
-
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")
