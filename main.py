@@ -25,9 +25,9 @@ from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.filters import StateFilter
+from aiogram.filters.state import StateFilter  # <-- fixed import
 
-# ---------- CONFIG (read from environment) ----------
+# ---------- CONFIG ----------
 API_TOKEN = os.getenv("API_TOKEN")
 if not API_TOKEN:
     raise SystemExit("Environment variable API_TOKEN is required")
@@ -43,7 +43,7 @@ AVATAR_EMOJIS = [
 ]
 
 DB_PATH = os.getenv("DB_PATH", "eaubot.db")
-WEBHOOK_BASE = os.getenv("WEBHOOK_BASE")  # e.g. https://your-app.onrender.com
+WEBHOOK_BASE = os.getenv("WEBHOOK_BASE")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -102,7 +102,6 @@ def db_execute(query, params=(), fetch=False, many=False):
     conn.close()
     return None
 
-# Rate-limits
 _last_confession = {}
 _last_comment = {}
 
@@ -111,15 +110,10 @@ class AddCommentState(StatesGroup):
 
 # ---------- Helpers ----------
 def check_profanity(text: str) -> bool:
-    t = text.lower()
-    for w in BAD_WORDS:
-        if w in t:
-            return True
-    return False
+    return any(w in text.lower() for w in BAD_WORDS)
 
 def format_confession_message(conf_id: int, text: str) -> str:
-    t = html.escape(text)
-    return f"👀 <b>{CONFESSION_NAME} #{conf_id}</b>\n\n{t}\n\n#Other"
+    return f"👀 <b>{CONFESSION_NAME} #{conf_id}</b>\n\n{html.escape(text)}\n\n#Other"
 
 def build_channel_keyboard(conf_id: int, comment_count: int, bot_username: str):
     view_url = f"https://t.me/{bot_username}?start=view_{conf_id}"
@@ -330,9 +324,8 @@ async def on_startup():
     BOT_USERNAME = me.username
     logger.info("Bot started as %s", BOT_USERNAME)
 
-    # Set webhook if WEBHOOK_BASE provided
     if WEBHOOK_BASE:
-        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}" + f"/webhook/{API_TOKEN}"
+        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}/webhook/{API_TOKEN}"
         try:
             await bot.set_webhook(webhook_url)
             logger.info("Webhook set to %s", webhook_url)
@@ -355,13 +348,11 @@ async def root():
 async def telegram_webhook(token: str, request: Request):
     if token != API_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid token")
-
     data = await request.json()
     try:
         update = Update(**data)
     except Exception:
         return {"ok": False}
-
     try:
         await dp.process_update(update)
     except Exception:
