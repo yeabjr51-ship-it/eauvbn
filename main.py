@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     Message,
@@ -25,6 +25,7 @@ from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.filters import StateFilter
 
 # ---------- CONFIG (read from environment) ----------
 API_TOKEN = os.getenv("API_TOKEN")
@@ -51,8 +52,6 @@ logger = logging.getLogger(__name__)
 storage = MemoryStorage()
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=storage)
-router = Router()
-dp.include_router(router)
 
 BOT_USERNAME: Optional[str] = None
 
@@ -103,7 +102,7 @@ def db_execute(query, params=(), fetch=False, many=False):
     conn.close()
     return None
 
-# ---------- Rate-limits ----------
+# Rate-limits
 _last_confession = {}
 _last_comment = {}
 
@@ -148,7 +147,7 @@ def get_top_menu():
     return kb
 
 # ---------- Handlers ----------
-@router.message(Command("start"))
+@dp.message.register(Command(commands=["start"]))
 async def cmd_start(message: Message, state: FSMContext):
     global BOT_USERNAME
     text = "Welcome to EAU Confessions — send an anonymous confession and I'll post it.\n\n"
@@ -159,7 +158,7 @@ async def cmd_start(message: Message, state: FSMContext):
         if args.startswith("view_"):
             try:
                 conf_id = int(args.split("_", 1)[1])
-                await send_comments_page(message.chat.id, conf_id, page=1, edit_message_id=None)
+                await send_comments_page(message.chat.id, conf_id, page=1)
                 return
             except Exception:
                 pass
@@ -173,11 +172,11 @@ async def cmd_start(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-@router.message(Command("help"))
+@dp.message.register(Command(commands=["help"]))
 async def cmd_help(message: Message):
     await message.answer("Use the buttons in the channel to interact with confessions.")
 
-@router.message(lambda m: m.text in ["📝 Confess", "👀 Browse Confessions"])
+@dp.message.register(lambda message: message.text in ["📝 Confess", "👀 Browse Confessions"])
 async def top_menu_buttons(message: Message):
     if message.text == "📝 Confess":
         await message.answer("Send your confession now.", reply_markup=ReplyKeyboardRemove())
@@ -185,7 +184,7 @@ async def top_menu_buttons(message: Message):
         await message.answer("Browse confessions:", reply_markup=ReplyKeyboardRemove())
         await message.answer("https://t.me/eauvents")
 
-@router.message()
+@dp.message.register()
 async def receive_confession(message: Message):
     if message.chat.type != "private":
         return
@@ -223,7 +222,7 @@ async def receive_confession(message: Message):
     _last_confession[uid] = now
     await message.reply(f"Posted as {CONFESSION_NAME} #{conf_id}")
 
-@router.message(state=AddCommentState.waiting_for_comment)
+@dp.message(StateFilter(AddCommentState.waiting_for_comment))
 async def process_comment(message: Message, state: FSMContext):
     data = await state.get_data()
     confession_id = data.get("confession_id")
@@ -311,7 +310,7 @@ async def send_comments_page(chat_id: int, confession_id: int, page: int = 1, ed
 
     await bot.send_message(chat_id, body, reply_markup=kb)
 
-@router.callback_query(lambda c: c.data and c.data.startswith("page:"))
+@dp.callback_query.register(lambda c: c.data and c.data.startswith("page:"))
 async def callback_page(call: CallbackQuery):
     await call.answer()
     try:
@@ -331,8 +330,9 @@ async def on_startup():
     BOT_USERNAME = me.username
     logger.info("Bot started as %s", BOT_USERNAME)
 
+    # Set webhook if WEBHOOK_BASE provided
     if WEBHOOK_BASE:
-        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}/webhook/{API_TOKEN}"
+        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}" + f"/webhook/{API_TOKEN}"
         try:
             await bot.set_webhook(webhook_url)
             logger.info("Webhook set to %s", webhook_url)
