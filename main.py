@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, types, filters
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     Message,
@@ -21,13 +21,12 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     Update,
 )
-from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.filters.state import StateFilter  # <-- fixed import
+from aiogram.fsm.filters import StateFilter
 
-# ---------- CONFIG ----------
+# ---------- CONFIG (read from environment) ----------
 API_TOKEN = os.getenv("API_TOKEN")
 if not API_TOKEN:
     raise SystemExit("Environment variable API_TOKEN is required")
@@ -43,7 +42,7 @@ AVATAR_EMOJIS = [
 ]
 
 DB_PATH = os.getenv("DB_PATH", "eaubot.db")
-WEBHOOK_BASE = os.getenv("WEBHOOK_BASE")
+WEBHOOK_BASE = os.getenv("WEBHOOK_BASE")  # e.g. https://your-app.onrender.com
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -102,6 +101,7 @@ def db_execute(query, params=(), fetch=False, many=False):
     conn.close()
     return None
 
+# Rate-limits
 _last_confession = {}
 _last_comment = {}
 
@@ -110,10 +110,15 @@ class AddCommentState(StatesGroup):
 
 # ---------- Helpers ----------
 def check_profanity(text: str) -> bool:
-    return any(w in text.lower() for w in BAD_WORDS)
+    t = text.lower()
+    for w in BAD_WORDS:
+        if w in t:
+            return True
+    return False
 
 def format_confession_message(conf_id: int, text: str) -> str:
-    return f"👀 <b>{CONFESSION_NAME} #{conf_id}</b>\n\n{html.escape(text)}\n\n#Other"
+    t = html.escape(text)
+    return f"👀 <b>{CONFESSION_NAME} #{conf_id}</b>\n\n{t}\n\n#Other"
 
 def build_channel_keyboard(conf_id: int, comment_count: int, bot_username: str):
     view_url = f"https://t.me/{bot_username}?start=view_{conf_id}"
@@ -141,7 +146,7 @@ def get_top_menu():
     return kb
 
 # ---------- Handlers ----------
-@dp.message.register(Command(commands=["start"]))
+@dp.message.register(filters.Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     global BOT_USERNAME
     text = "Welcome to EAU Confessions — send an anonymous confession and I'll post it.\n\n"
@@ -166,7 +171,7 @@ async def cmd_start(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-@dp.message.register(Command(commands=["help"]))
+@dp.message.register(filters.Command("help"))
 async def cmd_help(message: Message):
     await message.answer("Use the buttons in the channel to interact with confessions.")
 
@@ -216,7 +221,7 @@ async def receive_confession(message: Message):
     _last_confession[uid] = now
     await message.reply(f"Posted as {CONFESSION_NAME} #{conf_id}")
 
-@dp.message(StateFilter(AddCommentState.waiting_for_comment))
+@dp.message.register(StateFilter(AddCommentState.waiting_for_comment))
 async def process_comment(message: Message, state: FSMContext):
     data = await state.get_data()
     confession_id = data.get("confession_id")
@@ -324,8 +329,9 @@ async def on_startup():
     BOT_USERNAME = me.username
     logger.info("Bot started as %s", BOT_USERNAME)
 
+    # Set webhook if WEBHOOK_BASE provided
     if WEBHOOK_BASE:
-        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}/webhook/{API_TOKEN}"
+        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}" + f"/webhook/{API_TOKEN}"
         try:
             await bot.set_webhook(webhook_url)
             logger.info("Webhook set to %s", webhook_url)
@@ -348,11 +354,13 @@ async def root():
 async def telegram_webhook(token: str, request: Request):
     if token != API_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid token")
+
     data = await request.json()
     try:
         update = Update(**data)
     except Exception:
         return {"ok": False}
+
     try:
         await dp.process_update(update)
     except Exception:
