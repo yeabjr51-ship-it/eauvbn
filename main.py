@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     Message,
@@ -49,10 +49,10 @@ logger = logging.getLogger(__name__)
 
 # ---------- Bot & Dispatcher ----------
 storage = MemoryStorage()
-
-# aiogram v3.7+ requires default=DefaultBotProperties(...) instead of parse_mode=... in Bot(...)
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=storage)
+router = Router()
+dp.include_router(router)
 
 BOT_USERNAME: Optional[str] = None
 
@@ -103,7 +103,7 @@ def db_execute(query, params=(), fetch=False, many=False):
     conn.close()
     return None
 
-# Rate-limits
+# ---------- Rate-limits ----------
 _last_confession = {}
 _last_comment = {}
 
@@ -147,8 +147,8 @@ def get_top_menu():
     kb.add(KeyboardButton("👀 Browse Confessions"))
     return kb
 
-# ---------- Handlers (registered on dp) ----------
-@dp.message.register(Command(commands=["start"]))
+# ---------- Handlers ----------
+@router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     global BOT_USERNAME
     text = "Welcome to EAU Confessions — send an anonymous confession and I'll post it.\n\n"
@@ -156,17 +156,16 @@ async def cmd_start(message: Message, state: FSMContext):
 
     args = message.get_args()
     if args:
-        arg = args
-        if arg.startswith("view_"):
+        if args.startswith("view_"):
             try:
-                conf_id = int(arg.split("_", 1)[1])
+                conf_id = int(args.split("_", 1)[1])
                 await send_comments_page(message.chat.id, conf_id, page=1, edit_message_id=None)
                 return
             except Exception:
                 pass
-        if arg.startswith("add_"):
+        if args.startswith("add_"):
             try:
-                conf_id = int(arg.split("_", 1)[1])
+                conf_id = int(args.split("_", 1)[1])
                 await message.answer("Send your comment:")
                 await state.update_data(confession_id=conf_id)
                 await state.set_state(AddCommentState.waiting_for_comment)
@@ -174,11 +173,11 @@ async def cmd_start(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-@dp.message.register(Command(commands=["help"]))
+@router.message(Command("help"))
 async def cmd_help(message: Message):
     await message.answer("Use the buttons in the channel to interact with confessions.")
 
-@dp.message.register(lambda message: message.text in ["📝 Confess", "👀 Browse Confessions"])
+@router.message(lambda m: m.text in ["📝 Confess", "👀 Browse Confessions"])
 async def top_menu_buttons(message: Message):
     if message.text == "📝 Confess":
         await message.answer("Send your confession now.", reply_markup=ReplyKeyboardRemove())
@@ -186,9 +185,8 @@ async def top_menu_buttons(message: Message):
         await message.answer("Browse confessions:", reply_markup=ReplyKeyboardRemove())
         await message.answer("https://t.me/eauvents")
 
-@dp.message.register()
+@router.message()
 async def receive_confession(message: Message):
-    # only private allowed
     if message.chat.type != "private":
         return
     uid = message.from_user.id
@@ -225,7 +223,7 @@ async def receive_confession(message: Message):
     _last_confession[uid] = now
     await message.reply(f"Posted as {CONFESSION_NAME} #{conf_id}")
 
-@dp.message.register(state=AddCommentState.waiting_for_comment)
+@router.message(state=AddCommentState.waiting_for_comment)
 async def process_comment(message: Message, state: FSMContext):
     data = await state.get_data()
     confession_id = data.get("confession_id")
@@ -313,7 +311,7 @@ async def send_comments_page(chat_id: int, confession_id: int, page: int = 1, ed
 
     await bot.send_message(chat_id, body, reply_markup=kb)
 
-@dp.callback_query.register(lambda c: c.data and c.data.startswith("page:"))
+@router.callback_query(lambda c: c.data and c.data.startswith("page:"))
 async def callback_page(call: CallbackQuery):
     await call.answer()
     try:
@@ -333,9 +331,8 @@ async def on_startup():
     BOT_USERNAME = me.username
     logger.info("Bot started as %s", BOT_USERNAME)
 
-    # Set webhook if WEBHOOK_BASE provided
     if WEBHOOK_BASE:
-        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}" + f"/webhook/{API_TOKEN}"
+        webhook_url = f"{WEBHOOK_BASE.rstrip('/')}/webhook/{API_TOKEN}"
         try:
             await bot.set_webhook(webhook_url)
             logger.info("Webhook set to %s", webhook_url)
@@ -356,7 +353,6 @@ async def root():
 
 @app.post("/webhook/{token}")
 async def telegram_webhook(token: str, request: Request):
-    # Basic validation: ensure token path matches configured token
     if token != API_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid token")
 
@@ -364,10 +360,8 @@ async def telegram_webhook(token: str, request: Request):
     try:
         update = Update(**data)
     except Exception:
-        # If parsing fails, just return
         return {"ok": False}
 
-    # Feed update to dispatcher
     try:
         await dp.process_update(update)
     except Exception:
@@ -375,6 +369,5 @@ async def telegram_webhook(token: str, request: Request):
     return {"ok": True}
 
 if __name__ == "__main__":
-    # For local testing only. Render/production should use an ASGI server.
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")
