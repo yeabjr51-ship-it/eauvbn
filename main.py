@@ -207,7 +207,8 @@ async def receive_confession(message: types.Message):
     await message.reply(f"Posted as {CONFESSION_NAME} #{conf_id}")
 
 # ---------- Add Comment ----------
-@dp.message.register(lambda m, state: (await state.get_state()) == AddCommentState.waiting_for_comment, state=AddCommentState.waiting_for_comment)
+# FIX: The lambda filter using 'await' is removed. aiogram automatically filters by state
+@dp.message.register(state=AddCommentState.waiting_for_comment)
 async def process_comment(message: types.Message, state: FSMContext):
     data = await state.get_data()
     confession_id = data.get("confession_id")
@@ -337,6 +338,7 @@ async def main():
     # generic text messages (confessions)
     dp.message.register(receive_confession, lambda m: True)
     # state handler for comments:
+    # FIX: Remove the lambda filter that contained 'await state.get_state()'
     dp.message.register(process_comment, state=AddCommentState.waiting_for_comment)
     dp.callback_query.register(callback_page, lambda c: c.data and c.data.startswith("page:"))
 
