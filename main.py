@@ -10,8 +10,9 @@ from typing import Optional
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.enums import ParseMode # FIX: Imported ParseMode from aiogram.enums
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties # FIX: New import for Bot configuration
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
@@ -191,7 +192,7 @@ async def receive_confession(message: types.Message):
         sent = await bot.send_message(
             chat_id=CHANNEL_ID,
             text=formatted,
-            parse_mode=ParseMode.HTML,
+            parse_mode=ParseMode.HTML, # This still works for individual calls
             reply_markup=build_channel_keyboard(conf_id, 0, BOT_USERNAME)
         )
         db_execute("UPDATE confessions SET channel_message_id=? WHERE id=?", (sent.message_id, conf_id))
@@ -309,7 +310,11 @@ async def on_startup():
 
 async def main():
     global bot, dp
-    bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+    # FIX APPLIED HERE: Use default=DefaultBotProperties(...)
+    bot = Bot(
+        token=API_TOKEN, 
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
