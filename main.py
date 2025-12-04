@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.client.default import DefaultBotProperties # FIX: New import for Bot configuration
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
@@ -192,7 +192,7 @@ async def receive_confession(message: types.Message):
         sent = await bot.send_message(
             chat_id=CHANNEL_ID,
             text=formatted,
-            parse_mode=ParseMode.HTML, # This still works for individual calls
+            parse_mode=ParseMode.HTML,
             reply_markup=build_channel_keyboard(conf_id, 0, BOT_USERNAME)
         )
         db_execute("UPDATE confessions SET channel_message_id=? WHERE id=?", (sent.message_id, conf_id))
@@ -310,7 +310,6 @@ async def on_startup():
 
 async def main():
     global bot, dp
-    # FIX APPLIED HERE: Use default=DefaultBotProperties(...)
     bot = Bot(
         token=API_TOKEN, 
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -323,7 +322,10 @@ async def main():
     dp.message.register(cmd_help, Command(commands=["help"]))
     dp.message.register(top_menu_buttons, lambda m: m.text in ["📝 Confess", "👀 Browse Confessions"])
     dp.message.register(receive_confession, lambda m: True)
-    dp.message.register(process_comment, state=AddCommentState.waiting_for_comment)
+    
+    # FIX APPLIED HERE: Removed 'state=' keyword argument
+    dp.message.register(process_comment, AddCommentState.waiting_for_comment)
+    
     dp.callback_query.register(callback_page, lambda c: c.data and c.data.startswith("page:"))
 
     # run startup tasks
