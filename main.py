@@ -127,6 +127,9 @@ def get_top_menu():
 # ---------- Handlers (aiogram v3 style) ----------
 async def cmd_start(message: types.Message, state: FSMContext):
     global BOT_USERNAME
+    # Clear state in case the user was stuck
+    await state.clear()
+    
     text = "Welcome to EAU Confessions — send an anonymous confession and I'll post it.\n\n"
     await message.answer(text, reply_markup=get_top_menu())
 
@@ -151,6 +154,16 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 async def cmd_help(message: types.Message):
     await message.answer("Use the buttons in the channel to interact with confessions.")
+
+async def cmd_stop(message: types.Message, state: FSMContext):
+    """Allows user to exit any active state (e.g., adding a comment)."""
+    current_state = await state.get_state()
+    if current_state is None:
+        await message.answer("Nothing to stop. You're not in any active process.", reply_markup=get_top_menu())
+        return
+
+    await state.clear()
+    await message.answer("Operation cancelled. You can now use the main menu.", reply_markup=get_top_menu())
 
 async def top_menu_buttons(message: types.Message):
     if message.text == "📝 Confess":
@@ -279,7 +292,7 @@ async def send_comments_page(chat_id: int, confession_id: int, page: int = 1, ed
         snippet = html.escape(ctext if len(ctext) <= 250 else ctext[:247] + "...")
         body += f"{avatar} <b>Comment #{cid}</b>\n{snippet}\n\n"
 
-    kb = build_comment_page_keyboard(confession_id, page, total_pages)
+    kb = build_comment_page_keyboard(conf_id, page, total_pages)
 
     if edit_message_id:
         try:
@@ -320,10 +333,11 @@ async def main():
     # Explicitly register all handlers
     dp.message.register(cmd_start, Command(commands=["start"]))
     dp.message.register(cmd_help, Command(commands=["help"]))
+    dp.message.register(cmd_stop, Command(commands=["stop"]))
     dp.message.register(top_menu_buttons, lambda m: m.text in ["📝 Confess", "👀 Browse Confessions"])
     dp.message.register(receive_confession, lambda m: True)
     
-    # FIX APPLIED HERE: Removed 'state=' keyword argument
+    # Register FSM state filter
     dp.message.register(process_comment, AddCommentState.waiting_for_comment)
     
     dp.callback_query.register(callback_page, lambda c: c.data and c.data.startswith("page:"))
@@ -331,6 +345,8 @@ async def main():
     # run startup tasks
     await on_startup()
 
+    # NOTE: Webhook deletion is omitted as requested.
+    
     # start long-polling
     await dp.start_polling(bot)
 
