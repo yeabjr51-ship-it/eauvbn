@@ -9,8 +9,8 @@ from datetime import datetime
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton # ParseMode removed from here
-from aiogram.enums import ParseMode # ParseMode imported from enums
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.enums import ParseMode # FIX: Imported ParseMode from aiogram.enums
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Bot / Dispatcher will be created in main()
 bot: Optional[Bot] = None
-dp: Optional[Dispatcher] = None
+dp: Optional[Dispatcher] = None # dp is None here, causing the decorator error
 
 BOT_USERNAME: Optional[str] = None
 
@@ -124,7 +124,7 @@ def get_top_menu():
     return kb
 
 # ---------- Handlers (aiogram v3 style) ----------
-@dp.message.register(Command(commands=["start"]))
+# FIX: Removed @dp.message.register decorator
 async def cmd_start(message: types.Message, state: FSMContext):
     global BOT_USERNAME
     text = "Welcome to EAU Confessions — send an anonymous confession and I'll post it.\n\n"
@@ -149,11 +149,11 @@ async def cmd_start(message: types.Message, state: FSMContext):
             except:
                 pass
 
-@dp.message.register(Command(commands=["help"]))
+# FIX: Removed @dp.message.register decorator
 async def cmd_help(message: types.Message):
     await message.answer("Use the buttons in the channel to interact with confessions.")
 
-@dp.message.register(lambda m: m.text in ["📝 Confess", "👀 Browse Confessions"])
+# FIX: Removed @dp.message.register decorator
 async def top_menu_buttons(message: types.Message):
     if message.text == "📝 Confess":
         await message.answer("Send your confession now.", reply_markup=types.ReplyKeyboardRemove())
@@ -161,7 +161,7 @@ async def top_menu_buttons(message: types.Message):
         await message.answer("Browse confessions:", reply_markup=types.ReplyKeyboardRemove())
         await message.answer("https://t.me/eauvents")
 
-@dp.message.register(lambda m: True)
+# FIX: Removed @dp.message.register decorator
 async def receive_confession(message: types.Message):
     # Only accept in private chats
     if message.chat.type != "private":
@@ -208,8 +208,7 @@ async def receive_confession(message: types.Message):
     await message.reply(f"Posted as {CONFESSION_NAME} #{conf_id}")
 
 # ---------- Add Comment ----------
-# FIX: The lambda filter using 'await' is removed. aiogram automatically filters by state
-@dp.message.register(state=AddCommentState.waiting_for_comment)
+# FIX: Removed @dp.message.register decorator
 async def process_comment(message: types.Message, state: FSMContext):
     data = await state.get_data()
     confession_id = data.get("confession_id")
@@ -296,7 +295,7 @@ async def send_comments_page(chat_id: int, confession_id: int, page: int = 1, ed
     await bot.send_message(chat_id, body, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 # ---------- Callback Page ----------
-@dp.callback_query.register(lambda c: c.data and c.data.startswith("page:"))
+# FIX: Removed @dp.callback_query.register decorator
 async def callback_page(call: types.CallbackQuery):
     await call.answer()
     try:
@@ -318,29 +317,18 @@ async def main():
     global bot, dp
     bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
     storage = MemoryStorage()
+    # dp is initialized here, AFTER all functions are defined.
     dp = Dispatcher(storage=storage)
 
-    # register previously defined handlers to the dispatcher instance
-    # Because decorators used dp from module-level earlier, we need to attach handlers onto dp
-    # In aiogram v3, when decorator used dp.message.register at import time, it already registered to module-level dp.
-    # But here we created dp after decorator definitions; to ensure handlers are connected, re-register by importing handlers
-    # Simpler approach: create handlers with the module-level dp before, but to avoid confusion we will bind handlers now:
-    # (The decorators above referenced dp at import time which was None; to ensure correct operation we use dp.include_router by re-registering)
-    # To keep it simple and reliable, we'll import the module's globals and register functions manually:
-    for obj in globals().values():
-        # Register message handlers if they have attribute "register" set by decorator — but since we used decorators earlier they'd have been registered to a dp object that was None.
-        # To avoid complex reflection, use a simpler approach: re-register the main handlers here using the same filters.
-        pass
-
-    # Instead of complex re-binding, rebuild handler registration here explicitly to ensure correct behavior:
+    # Now, explicitly register all handlers to the live dp object.
     dp.message.register(cmd_start, Command(commands=["start"]))
     dp.message.register(cmd_help, Command(commands=["help"]))
     dp.message.register(top_menu_buttons, lambda m: m.text in ["📝 Confess", "👀 Browse Confessions"])
     # generic text messages (confessions)
     dp.message.register(receive_confession, lambda m: True)
     # state handler for comments:
-    # FIX: Remove the lambda filter that contained 'await state.get_state()'
     dp.message.register(process_comment, state=AddCommentState.waiting_for_comment)
+    # callback handler
     dp.callback_query.register(callback_page, lambda c: c.data and c.data.startswith("page:"))
 
     # run startup tasks
@@ -354,4 +342,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot stopped")
-
